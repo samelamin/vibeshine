@@ -1,6 +1,8 @@
 ---
 name: VR-Pairing-CI
-permissions: {}
+permissions:
+  actions: read
+  contents: read
 
 on:
   workflow_dispatch:
@@ -12,7 +14,9 @@ on:
 jobs:
   windows-preview-build:
     name: Windows preview build (fork-owned, full TrueHDR parity)
-    permissions: {}
+    permissions:
+      actions: read
+      contents: read
     uses: samelamin/vibeshine/.github/workflows/ci-windows.yml@quest/vr-pairing-ci
     with:
       use_self_hosted: false
