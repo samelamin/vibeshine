@@ -40,6 +40,7 @@ namespace {
   struct peer_t {
     std::atomic<bool> stop {false}, stall {false}, failed {false};
     std::atomic<unsigned> connections {0};
+    std::atomic<DWORD> last_error {ERROR_SUCCESS};
     std::wstring name;
     std::thread thread;
     explicit peer_t(DWORD session): name(L"\\\\.\\pipe\\VibertemisVRBridge-"+std::to_wstring(session)), thread([this]{ run(); }) {}
@@ -69,14 +70,21 @@ namespace {
         while(!stop) {
           HANDLE pipe=CreateNamedPipeW(name.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,
               PIPE_TYPE_BYTE|PIPE_READMODE_BYTE|PIPE_NOWAIT|PIPE_REJECT_REMOTE_CLIENTS,1,65536,65536,0,nullptr);
-          if(pipe==INVALID_HANDLE_VALUE){failed=true;return;}
+          if(pipe==INVALID_HANDLE_VALUE){last_error=GetLastError();failed=true;return;}
           auto close=util::fail_guard([&]{DisconnectNamedPipe(pipe);CloseHandle(pipe);});
+          bool abandoned=false;
           bool connected=until([&]{
             if(stop)return true;
-            if(ConnectNamedPipe(pipe,nullptr))return true;
-            return GetLastError()==ERROR_PIPE_CONNECTED;
+            // PIPE_NOWAIT success means available, not connected.
+            if(ConnectNamedPipe(pipe,nullptr))return false;
+            const DWORD error=GetLastError();
+            last_error=error;
+            // A rejected client may close before the peer observes CONNECTED.
+            // Recreate this instance immediately; otherwise it stays unavailable.
+            if(error==ERROR_NO_DATA || error==ERROR_BROKEN_PIPE){abandoned=true;return true;}
+            return error==ERROR_PIPE_CONNECTED;
           },8s);
-          if(!connected || stop)continue;
+          if(!connected || stop || abandoned)continue;
           ++connections;
           json held;
           while(!stop) {
@@ -140,7 +148,8 @@ TEST(VrPairingBridgeIpc, ActualTransportRejectsWrongPeerThenHandlesDuplexDeadlin
   peer_t peer(session);
   EXPECT_FALSE(until([]{return host_bridge::get_capabilities().bridge_ready;},1500ms));
   ASSERT_EQ(set(L"CompanionPath",image),ERROR_SUCCESS);
-  ASSERT_TRUE(until([]{return host_bridge::get_capabilities().bridge_ready;},5s));
+  ASSERT_TRUE(until([]{return host_bridge::get_capabilities().bridge_ready;},5s))
+      << "connections=" << peer.connections << " peer_failed=" << peer.failed << " last_pipe_error=" << peer.last_error;
   wire::issue_grant_request_t request {uuid,"fixture certificate",sha,sha,std::string(64,'c')};
   auto grant=host_bridge::request_issue_grant(request);
   ASSERT_TRUE(grant.has_value());

@@ -621,6 +621,8 @@ jobs:
             -DWEBRTC_WINSDK_DIR="$(cygpath -u "${WEBRTC_WINSDK_DIR}")" \
             -DSUNSHINE_NPM_EXECUTABLE="${NPM_PATH}" \
             -DSUNSHINE_ASSETS_DIR=assets \
+            -DSUNSHINE_REPO_OWNER="${GITHUB_REPOSITORY_OWNER}" \
+            -DSUNSHINE_REPO_NAME="${GITHUB_REPOSITORY#*/}" \
             -DSUNSHINE_PUBLISHER_NAME="${GITHUB_REPOSITORY_OWNER}" \
             -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/${GITHUB_REPOSITORY}" \
             -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/${GITHUB_REPOSITORY}/issues" \
