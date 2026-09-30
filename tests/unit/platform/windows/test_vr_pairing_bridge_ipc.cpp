@@ -1,5 +1,9 @@
 // Actual production Asio transport, with only paired-client DB authority faked.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
+#include <functional>
 #include <sddl.h>
 #include <atomic>
 #include <chrono>

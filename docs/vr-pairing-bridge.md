@@ -1,258 +1,58 @@
-#Vibeshine first - party VR pairing bridge
+# Vibeshine VR pairing bridge
 
-The Vibeshine half of the first - party VR pairing bridge connects Sunshine to a per - user companion that brokers the Android client's TLS pairing handshake. This document records the wire contract, the trust boundary, and the Windows runtime constraints.
+The bridge lets Vibertemis reuse an existing GameStream pairing to enroll with the Windows VR companion. The Quest app selects its paired PC under **Setup VR**; the normal flow requires no pairing-file copy/paste.
 
-                                                                                                                                                                                                                                This branch implements **only **the
-                                                                                                                                                                                                                                Vibeshine(host)
-side of the bridge.The
-  companion implementation lives in its own repository;
-the wire contract here
-        is the binding contract between the two implementations.
+## Setup and scope
 
-      ##Topology
+Install the VR-enabled Vibeshine build and the matching Vibertemis VR Host Manager. Run **Setup VR** in the manager once. It checks the Windows runtime, registers the companion with an elevated helper, and prepares the driver and firewall. Hosting resumes after Windows sign-in when enabled. SteamVR starts on an authenticated VR connection, not when the host starts or a flat-screen client connects.
 
-``` Android client-- -
-      TLS / pinned-- >
-    Companion(per - user, unsigned) |
-  v
-                          \\.\pipe\VibertemisVRBridge - <sessionid> |
-  v Sunshine(Vibeshine host)
-```
+This bridge handles enrollment and authorization, not video transport or NAT traversal. Both the existing GameStream endpoint and the native VR companion/stream must be reachable. Forwarding GameStream ports alone is insufficient for tracked VR. Use a reachable local or VPN path for the native VR test.
 
-    The companion owns the named
-    - pipe server.The host is the client and reconnects on failure with bounded backoff.The host NEVER impersonates the peer: the pipe is opened with `SECURITY_SQOS_PRESENT
-  | SECURITY_IDENTIFICATION` and the host inspects the peer's TokenUser via identification-level
-`ImpersonateNamedPipeClient`.The companion is the side that uses full
-`ImpersonateNamedPipeClient` to verify `SunshinePath` against the host identity.
+## Trust boundary
 
-        ##Trust boundary(Agy adjudication)
+Registration lives in 64-bit `HKLM\SOFTWARE\Vibertemis\VRBridge`: `UserSid`, `CompanionPath`, and `SunshinePath`. The elevated VR setup helper writes canonical paths and a protected ACL. Runtime processes only read registration.
 
-        * The companion per
-      - user process is **unsigned **;
-we do not assume
-      Authenticode on it.* `sunshinesvc::DuplicateTokenForSession` duplicates the LocalSystem token and
-  only changes the session id,
-  so a Sunshine host that entered the
-    active console session as SYSTEM may legitimately own a LocalSystem
-      identity.We therefore **never assume the host is the user **.
-        *Registration values `UserSid`, `CompanionPath`, `SunshinePath` under
-  `HKLM\SOFTWARE\Vibertemis\VRBridge` are written by the **elevated Windows installer **(the VR helper setup helper).They are canonical absolute paths.Runtime does not write them.* The malicious admin / SYSTEM and same - user malware threat models already hold the private keys needed to forge the Sunshine TLS identity,
-  so we do not gain anything by trying to lock them out further.We * *do * *protect other users on the host and remote attackers from impersonating the companion.* The host validates the pipe SERVER(companion)
-on every connection:
-  `GetNamedPipeServerProcessId` -> `QueryFullProcessImageNameW` must match
-      the registered `CompanionPath` exactly(case -insensitive canonical path comparison), `ImpersonateNamedPipeClient` (identification - only) reads
-  `TokenUser` which must equal `UserSid`,
-  and the peer's session id must equal both the active console session id and the host's own session id.
-    *The host only brokers the `issue_grant` RPC: it never persists the grant,
-  never logs it, and only relays the validated bounded response fields.*The fresh authorize RPC is authoritative.A revoke notification is best effort;
-if it {
-  is missed the next authorize still denies the disabled
-        record.
+The companion owns `\\.\pipe\VibertemisVRBridge-<active-session-id>`. The host opens it with `SECURITY_SQOS_PRESENT | SECURITY_IDENTIFICATION`, validates the server process's canonical executable, primary-token SID, and session, and never impersonates the companion. The companion uses identification-level pipe impersonation to inspect the host token, then reverts before opening process handles. Sunshine can legitimately run as SYSTEM in the active console session: `sunshinesvc` duplicates the SYSTEM token into that session. Both sides reject a different session or changed registration.
 
-      ##Wire contract
+The HTTPS handlers obtain the certificate from the live TLS connection, then resolve its current paired-client authority under `client_mutex`. A cached endpoint identity is insufficient. Duplicate, disabled, or removed clients fail authorization. The companion rechecks host authority at grant redemption and on each inherited-device request. Revoke delivery is best effort; fresh authorization remains authoritative.
 
-        Wire schema version: **1 *
-      *.
+The per-user companion and preview installers are unsigned. This trust model excludes a malicious administrator/SYSTEM or compromised paired user's private keys; it does not bypass certificate checks for remote callers.
 
-       Frame : 4 -
-    byte little - endian uint32 length prefix + JSON payload(max 65536 bytes per frame, defended at both ends).
+## Wire contract
 
-                                                Channel messages:
+Schema version 1. Pipe frames contain a four-byte little-endian payload length followed by UTF-8 JSON, at most 65,536 payload bytes. Requests have `{v:1,id,op,payload}` with a nonempty ID. Responses echo the ID with `{v:1,id,ok:true,payload}` or `{v:1,id,ok:false,error}`.
 
-```jsonc
-      // Companion -> Host request
-      {
-        "v": 1,
-        "id": "<random caller-chosen id; echoed in response>",
-        "op": "authorize",
-        "payload": {"client_uuid": "<uuid>", "client_cert_sha256": "<64 lower-hex>"}
-      }
+Host to companion operations:
 
-  // Host -> Companion response
-  {
-    "v" : 1,
-      "id": "<echo>", "ok": true, "payload": {
-      "authorized": true | false
-    }
-  }
-}
+- `ping`: empty payload; successful response establishes readiness.
+- `issue_grant`: `client_uuid`, `client_cert_pem`, `client_cert_sha256`, `host_cert_sha256`, and `client_nonce`.
+- `revoke`: `client_uuid`; a bounded request with an ID, never a readiness dependency.
 
-// Host -> Companion revoke notification (best effort)
-{
-  "v" : 1,
-    "id": "", "op": "revoke", "payload": {"client_uuid": "<uuid>"}
-}
+Companion to host operation:
 
-// Host -> Companion issue_grant request (broker-only; never persisted)
-{
-  "v" : 1,
-    "id": "<random caller-chosen id>", "op": "issue_grant", "payload": {
-      "client_uuid": "<uuid>",
-      "client_cert_pem": "<PEM>",
-      "client_cert_sha256": "<64 lower-hex>",
-      "host_cert_sha256": "<64 lower-hex>",
-      "client_nonce": "<64 lower-hex>"
-    }
-}
+- `authorize`: `client_uuid` and `client_cert_sha256`; response payload is `{authorized: true|false}` from the current paired-client database.
 
-// Companion -> Host issue_grant response
-{
-  "v" : 1,
-    "id": "<echo>", "ok": true, "payload": {
-      "grant": "<base64 string, 1..4096 chars>",
-      "expires_unix": <int64>,
-      "client_nonce": "<64 lower-hex>",
-      "client_uuid": "<uuid>",
-      "host_cert_sha256": "<64 lower-hex>",
-      "companion_cert_sha256": "<64 lower-hex>",
-      "port": 28540
-    }
-}
+Successful grant payload: `schema:1`, `grant` (64 lowercase hex), `expires_unix`, echoed `client_nonce`, `client_uuid`, `host_cert_sha256`, `companion_cert_sha256`, and `port`. Certificate fingerprints and the nonce are 64 lowercase hex characters.
 
-// Companion -> Host error response (matches `error::kFoo` token)
-{
-  "v": 1,
-  "id": "<echo>",
-  "ok": false,
-  "error": "unsupported" | "bridge_absent" | "bad_request" |
-    "unpaired" | "revoked" | "rate_limited" | "internal" |
-    "timeout" | "disconnected" | "proto" |
-    "path_mismatch" | "sid_mismatch" | "session_mismatch"
-}
-```
+The Android client redeems the short-lived, single-use grant at the pinned companion HTTPS endpoint. Its RSA signature binds the nonce, grant, both certificate fingerprints, and client UUID. The companion persists a device credential only after fresh authorization; failed persistence leaves the prior pairing intact. Legacy manual pairing remains available under Advanced.
 
-  The wire field names(`v`, `id`, `op`, `payload`, `ok`, `error `,
-`client_uuid`, `client_cert_pem`, `client_cert_sha256`, `host_cert_sha256`,
-`companion_cert_sha256`, `client_nonce`, `grant`, `expires_unix`, `port`,
-`authorized`) are part of the contract.Renaming breaks the companion.
+## GameStream HTTPS API
 
-  ##HTTP API
+Both endpoints require an existing valid paired-client certificate:
 
-  Both endpoints are added to the existing HTTPS server alongside the existing paired
-  - client routes(`/ pair`, `/ unpair`, etc.).They require the same pinned TLS client cert chain as the rest of the HTTPS API.The fresh peer - cert validation is performed on every call: the TLS endpoint cache is explicitly **not **consulted.
+- `GET /api/vr/capabilities`: `{schema:1,bootstrap:1,bridge_ready,error}`. Readiness requires a verified live pipe and successful ping.
+- `POST /api/vr/bootstrap`: `{schema:1,client_nonce}`; body at most 16 KiB. Returns the grant payload above.
 
-                                                                                                                                                                                           ## # `GET
-                                                                                                                                                 / api / vr / capabilities`
+Bootstrap is limited to six requests per client per minute and sixty globally. Invalid input returns 400/413; revoked or unpaired clients return 401; throttling returns 429; an unavailable bridge returns 503; a failed companion grant returns 502. No grants or device tokens are logged.
 
-                                                                                                                                                 Response(always 200):
+## Transport and validation
 
-```json {
-      "schema": 1,
-      "bootstrap": 1,
-      "bridge_ready": true,
-      "error": ""
-    }
-```
+One Boost.Asio worker owns each host pipe generation. Pending calls and submissions are bounded; RPCs, writes, and partial frames have five-second deadlines. The reader handles unsolicited authorization while an outgoing grant is pending. Cancellation retains buffers until completion, disconnect clears pending calls, and reconnection revalidates registration and peer identity.
 
-`bridge_ready` is true only when the elevated installer registered the bridge triad under `HKLM\SOFTWARE\Vibertemis\VRBridge`,
-the active console session exists,
-and the host is currently executing inside that session.Anything else means `bridge_ready = false` and a populated `error `.
+`test_fast_vr_pairing_bridge_protocol` checks portable framing and validation. `test_component_vr_pairing_bridge_ipc` links the actual Windows transport against a real OS pipe peer and tests rejected peer paths, fragmented duplex traffic, deadlines, reconnect, and shutdown. It requires an elevated active-console Windows runner and refuses to overwrite existing bridge registration. The preview CI explicitly runs both after building. Physical Quest tracking, controllers, streaming quality, and remote-network behavior still require end-to-end hardware tests.
 
-                                                                                                           ## # `POST
-                                                                                                           / api / vr / bootstrap`
+The fork-owned preview workflow reuses the Windows build and dependency pins. It bundles the pinned public TrueHDR runtime, sets `build_tests=true`, `build_only=true`, and `require_signpath_signing=false`. It does not publish to upstream or claim Authenticode parity. The update feed points to this fork so updates do not silently remove the VR bridge.
 
-                                                                                                           Request body(max 16 KiB):
+## Review record
 
-```json {"schema": 1, "client_nonce": "<64 lower-hex>"}
-```
-
-    Response body on success(200):
-
-```json {
-      "schema": 1,
-      "grant": "<base64>",
-      "expires_unix": <int64>,
-      "client_nonce": "<64 lower-hex>",
-      "client_uuid": "<uuid>",
-      "host_cert_sha256": "<64 lower-hex>",
-      "companion_cert_sha256": "<64 lower-hex>",
-      "port": 28540
-    }
-```
-
-    Status codes:
-
-                                                                                                         | Code | Meaning | | -- -- --| -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --| | 200 | Success.Body matches the contract above.| | 400 | Bad request(malformed JSON, schema mismatch, malformed nonce).| | 401 | The presenting peer is not authorized(no live TLS handshake / unpaired / revoked).| | 413 | Body too large(> 16 KiB).| | 429 | Rate - limited(per - client 6 / minute, global 60 / minute).| | 502 | Companion rejected the `issue_grant` RPC.| | 503 | Bridge not ready(no registration, host not in active console session).|
-
-                                                                                                         ##Implementation notes
-
-                                                                                                             * The portable layer(`src / vr_pairing_bridge.{ h, cpp }`) is platform
-                                                                                                           - neutral
-                                                                                            and depends only on `nlohmann_json`.It defines the frame format,
-                                                                            JSON envelope shape, error tokens, op names, and field validators.*The platform interface(`src / platform / common / vr_pairing_bridge.{ h, cpp }`) defines the cross - platform API surface.The non - Windows stub returns
-  `bridge_ready = false` so the HTTPS handlers always respond with 503 outside Windows builds.* The Windows transport(`src / platform / windows / vr_pairing_bridge.cpp`) owns the named - pipe client(overlapped I / O), the reader thread, the pending RPC map, the revoke queue, and the registry reloader.*The HTTPS handlers in `src / nvhttp.cpp` consult a sidecar handshake map keyed by `SSL *` to obtain the live peer cert captured during the TLS handshake.A fresh re - derivation of the canonical DER identity + the global paired - clients resolver is performed under `client_mutex` so racing disable / unpair is observed.
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            ##Unbundled TrueHDR limitation
-
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            This branch ships the RTX HDR SDR→HDR synthesis stubs but does not include the TrueHDR runtime.The preview CI workflow(`vr - pairing - ci.yml`) sets
-`require_truehdr_runtime = false`.The MSI does * *not * *claim full feature parity with the unbundled TrueHDR release;
-downstream consumers should
-    document this.RTX HDR works as a no -
-  op when the runtime DLL is absent.
-
-    ##Workflow
-
-`.github /
-    workflows / vr -
-  pairing - ci.yml` reuses the existing
-`.github / workflows / ci - windows.yml` via `uses:` so the preview build uses the exact same Windows build matrix and dependency pins.The workflow is pinned to the fork owner(`samelamin / vibeshine`); it never publishes a release to
-`Nonary/vibeshine`.
-
-Inputs used:
-
-* `require_signpath_signing=false` (preview never publishes a signed MSI)
-* `require_truehdr_runtime=false` (preview does not bundle the runtime)
-* `build_tests=true` (the VR bridge test target builds and runs)
-* `build_only=true` (no SignPath submission)
-* `release_artifact_retention_days=1` (preview artifacts live one day)
-
-## Unresolved Windows runtime limits
-
-This branch was authored on a Linux CI host and reviewed by codex for
-contract/IO/security issues. The following Windows runtime limits remain:
-
-1. **End-to-end Windows execution was not performed in this worktree.** The
-   `src/platform/windows/vr_pairing_bridge.cpp` file was reviewed for
-   syntax, namespace, and resource lifetime; it was not compiled or
-   executed against a live `sunshinesvc` + companion. A real Windows CI
-   build will reveal any compilation errors I missed.
-2. **Windows IPC tests are wired up but not executed locally.** The
-   portable test target (`test_fast_vr_pairing_bridge_protocol`) runs on
-   every platform and exercises frame/JSON/validators/contract invariants.
-   The Windows-only IPC test target
-   (`test_component_vr_pairing_bridge_ipc`) drives a fake companion against
-   real named pipes (fragmented frames, concurrent responses, stalled
-   reads, disconnect mid-RPC, peer path/SID/session authority, host does
-   not adopt peer identity) and runs under `BUILD_TESTS=ON` in the Windows
-   preview CI workflow. End-to-end Windows execution still depends on the
-   real CI runner.
-3. **Authenticode on the companion is not assumed.** If the user's threat
-   model demands Authenticode, that has to be added to `verify_peer` and is
-   not currently part of the contract.
-4. **The companion is per-user and unsigned.** Any code-signing policy
-   for the companion is out of scope for this branch. The preview workflow
-   does NOT claim Authenticode parity.
-6. **No automatic deploy.** The preview workflow never pushes artifacts
-   anywhere except the fork-owned CI artifacts, which expire after one day.
-
-## What is intentionally NOT changed
-
-* The existing TLS verification pipeline, `cert_chain`, and the
-  `tls_client_identity_by_endpoint` cache remain untouched. The VR bridge
-  has its own handshake sidecar map keyed by `SSL*`;
-we do **not **weaken or shortcut the existing endpoint cache.
-                          * `setBitrate`, `/ api / abr / capabilities`, `/ pyrowave - bandwidth - probe`,
-  and every other existing HTTPS route is untouched.
-        * `sunshinesvc` (the elevated helper service) is untouched.The adjudication noted that `sunshinesvc::DuplicateTokenForSession` duplicates LocalSystem;
-we accept that fact but we do not write any state from sunshinesvc
-  ourselves.
-
-## Takeover transport review — 2026-09-30
-
-Agy Gemini 3.1 Pro (High) reviewed the transport correction plan. The host now uses Boost.Asio stream_handle with one I/O worker, bounded submissions/pending requests, per-operation deadlines, ownership through cancelled completions, and an explicit authenticated ping before advertising readiness. Registration loss/session changes close the generation.
-
-Adjudication: retain the HTTP caller absolute deadline as well as the I/O deadline: shared promise ownership makes abandonment safe and bounds callers if the worker stalls. Unsolicited companion authorize RPCs are required; therefore incoming partial frames use a five-second timer rather than rejecting traffic when no host RPC is pending. Host startup discovers the local bridge without starting SteamVR.
-
-This branch is a draft for Windows CI, not a release or final sign-off. Real Windows transport and final Agy review remain required.
-
-Agy implementation review found no concrete transport lifetime/authentication blocker after correction. Source verification resolves its conditional comments: `util::FailGuard` runs unless disabled; `sunshinesvc.cpp` creates Sunshine in the active console session with a duplicated SYSTEM token; Windows uses the current MSYS OpenSSL dependency. Initial Windows CI caught the standalone test source being compiled twice (once without its macros); CMake now compiles only its including runner. Actual host/pipe tests remain the release gate.
+Agy Gemini 3.1 Pro (High) reviewed the plan and implementation. Agreed corrections include one asynchronous I/O owner, bounded deadlines, explicit ping readiness, live TLS peer identity, and fresh paired-client authority. Keep both the HTTP caller deadline and the I/O deadline: shared promises make caller abandonment safe. Windows runtime CI and the final review remain release gates; a source review alone does not prove an end-to-end headset session.
