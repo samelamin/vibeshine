@@ -56,3 +56,5 @@ The fork-owned preview workflow reuses the Windows build and dependency pins. It
 ## Review record
 
 Agy Gemini 3.1 Pro (High) reviewed the plan and implementation. Agreed corrections include one asynchronous I/O owner, bounded deadlines, explicit ping readiness, live TLS peer identity, and fresh paired-client authority. Keep both the HTTP caller deadline and the I/O deadline: shared promises make caller abandonment safe. Windows runtime CI and the final review remain release gates; a source review alone does not prove an end-to-end headset session.
+
+Agy's final incremental review approved the handler type corrections and updated guided UI after the Windows manager passed real installer and two signed update handoffs. The source review found no P0/P1 defect. Its proposed skip/mock of the host test's active-console constraint was rejected: the Windows test must exercise the real session boundary. Reconnection is asserted by observing a new server-side connection, not a possibly stale readiness flag. Final Windows host execution remains required before publishing.

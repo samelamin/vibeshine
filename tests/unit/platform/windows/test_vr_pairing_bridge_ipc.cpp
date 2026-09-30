@@ -39,6 +39,7 @@ namespace {
   }
   struct peer_t {
     std::atomic<bool> stop {false}, stall {false}, failed {false};
+    std::atomic<unsigned> connections {0};
     std::wstring name;
     std::thread thread;
     explicit peer_t(DWORD session): name(L"\\\\.\\pipe\\VibertemisVRBridge-"+std::to_wstring(session)), thread([this]{ run(); }) {}
@@ -76,6 +77,7 @@ namespace {
             return GetLastError()==ERROR_PIPE_CONNECTED;
           },8s);
           if(!connected || stop)continue;
+          ++connections;
           json held;
           while(!stop) {
             uint8_t prefix[4];
@@ -146,11 +148,12 @@ TEST(VrPairingBridgeIpc, ActualTransportRejectsWrongPeerThenHandlesDuplexDeadlin
   EXPECT_EQ(authority_calls.load(),1u);
   EXPECT_FALSE(peer.failed);
   peer.stall=true;
+  const auto previous_connections=peer.connections.load();
   const auto begin=std::chrono::steady_clock::now();
   EXPECT_FALSE(host_bridge::request_issue_grant(request).has_value());
   EXPECT_GE(std::chrono::steady_clock::now()-begin,4s);
   EXPECT_LT(std::chrono::steady_clock::now()-begin,7s);
-  ASSERT_TRUE(until([]{return host_bridge::get_capabilities().bridge_ready;},5s));
+  ASSERT_TRUE(until([&]{return peer.connections.load()>previous_connections && host_bridge::get_capabilities().bridge_ready;},5s));
   auto waiting=std::async(std::launch::async,[&]{return host_bridge::request_issue_grant(request);});
   std::this_thread::sleep_for(100ms);
   const auto stop_begin=std::chrono::steady_clock::now();
