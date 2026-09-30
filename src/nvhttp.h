@@ -308,4 +308,62 @@ namespace nvhttp {
    * @note Exposed so subsystems (e.g. update) can trigger a save after mutating persisted fields.
    */
   bool save_state();
+
+  /// Host-side hooks for the first-party VR pairing bridge.
+  /// The bridge calls back into these from its inbound-authorize dispatcher;
+  /// the HTTPS /api/vr/* handlers call them via the platform-level
+  /// platf::vr_pairing_bridge API.
+  namespace vr_pairing_bridge {
+
+    /// Result of resolving the presenting TLS peer cert against the live,
+    /// handshake-fresh paired-clients database. The TLS endpoint cache is
+    /// explicitly NOT consulted: this gate observes racing disable/unpair.
+    struct resolved_peer_t {
+      std::string uuid;
+      std::string name;
+      std::string cert_pem;  ///< Canonical PEM, suitable for relay.
+      std::string cert_der;  ///< Canonical DER bytes (for SHA-256).
+    };
+
+    /**
+     * @brief Resolve (uuid, cert_sha256) against the current paired-clients
+     *        database using the global resolver.
+     *
+     * Fails closed on duplicate-uuid/duplicate-certificate state. The
+     * companion extracts the cert SHA-256 (DER) from the Android client's
+     * TLS certificate; the host compares it against the canonical DER
+     * identity of the stored paired record identified by uuid. Returns
+     * true only when the record exists, is enabled, and the SHA-256 matches
+     * exactly.
+     */
+    bool authorize_client_locked(
+      const std::string &client_uuid,
+      const std::string &client_cert_sha256);
+
+    /**
+     * @brief Fresh-resolve a presenting peer cert (X509*) against the live
+     *        paired-clients database.
+     *
+     * Used by the /api/vr/bootstrap handler to consult the actual TLS peer
+     * certificate from the live connection, NOT the endpoint cache. The current enabled record must match the exact certificate.
+     *
+     * @param presented_cert The peer cert from the live TLS handshake.
+     *                       Caller retains ownership; we do not free.
+     * @param out On success, filled with the resolved identity.
+     * @return true when authorized; false on any mismatch, ambiguity, or
+     *         invalid state.
+     */
+    bool resolve_presented_peer_locked(
+      X509 *presented_cert,
+      resolved_peer_t &out);
+
+    /// Lowercase hex SHA-256 of the host GameStream certificate (DER), 64 chars.
+    std::string host_cert_sha256_hex();
+
+    /// Called from set_client_enabled/unpair_client *after* the client_mutex
+    /// is released, to enqueue a best-effort revoke notification.
+    void notify_pairing_changed(std::string_view client_uuid);
+
+
+  }  // namespace vr_pairing_bridge
 }  // namespace nvhttp

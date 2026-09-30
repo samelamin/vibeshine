@@ -218,6 +218,11 @@ if(NOT TARGET Boost::algorithm OR
 endif()
 find_package(OpenSSL REQUIRED)
 
+# The VR pairing bridge portable tests need nlohmann_json. Use the same
+# fetch strategy as the main build so the standalone tests entry point
+# does not depend on a system package.
+include("${CMAKE_CURRENT_LIST_DIR}/../cmake/dependencies/nlohmann_json.cmake")
+
 set(SUNSHINE_TEST_SOCKET_LIBRARIES "")
 if(WIN32)
     set(SUNSHINE_TEST_SOCKET_LIBRARIES ws2_32)
@@ -286,6 +291,27 @@ sunshine_add_test_target(
     LINK_LIBRARIES GTest::gtest
     DEPENDENCIES
 )
+
+# VR pairing bridge portable protocol tests. This target uses a standalone
+# test runner (no GTest dependency) so it runs on every platform and every
+# toolchain, including minimal Linux CI runners without GTest submodules
+# available. It exercises only the portable protocol layer (frame, JSON
+# envelopes, field validators, bounded contract values) — the Windows-
+# only IPC tests live in a separate Windows-only test target.
+add_executable(test_fast_vr_pairing_bridge_protocol
+    "${CMAKE_CURRENT_LIST_DIR}/unit/test_vr_pairing_bridge_protocol_main.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/unit/test_vr_pairing_bridge_protocol.cpp"
+    "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/vr_pairing_bridge.cpp"
+)
+target_include_directories(test_fast_vr_pairing_bridge_protocol PRIVATE
+    "${SUNSHINE_TEST_REPOSITORY_ROOT}"
+    "${SUNSHINE_TEST_REPOSITORY_ROOT}/tests/unit"
+    "${SUNSHINE_TEST_REPOSITORY_ROOT}/third-party/Simple-Web-Server"
+)
+target_compile_definitions(test_fast_vr_pairing_bridge_protocol PRIVATE SUNSHINE_TESTS)
+target_link_libraries(test_fast_vr_pairing_bridge_protocol PRIVATE nlohmann_json::nlohmann_json)
+add_test(NAME test_fast_vr_pairing_bridge_protocol COMMAND test_fast_vr_pairing_bridge_protocol)
+set_tests_properties(test_fast_vr_pairing_bridge_protocol PROPERTIES LABELS "fast")
 
 sunshine_add_test_target(
     NAME test_fast_thread_safe
@@ -876,6 +902,13 @@ if(WIN32)
         PRODUCT_SOURCES "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/platform/windows/vhf_gamepad_policy.cpp"
         INCLUDE_DIRECTORIES "${SUNSHINE_LIBVIRTUALGAMEPAD_INCLUDE_DIR}"
         LINK_LIBRARIES sunshine_test_moonlight_headers)
+    # VR pairing bridge: Windows-only IPC tests against real Windows
+    # headers. The fake-peer runs in the same process; the production
+    # protocol types and helpers are exercised against a real named
+    # pipe to validate the contract end-to-end.
+    sunshine_register_component(NAME test_component_vr_pairing_bridge_ipc TEST_SOURCE unit/platform/windows/test_vr_pairing_bridge_ipc.cpp
+        PRODUCT_SOURCES "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/vr_pairing_bridge.cpp"
+        LINK_LIBRARIES nlohmann_json::nlohmann_json)
     sunshine_register_component(NAME test_component_virtual_display_cleanup_policy TEST_SOURCE unit/test_virtual_display_cleanup_policy.cpp)
     sunshine_register_component(NAME test_component_lossless_scaling_policy TEST_SOURCE unit/test_lossless_scaling.cpp
         PRODUCT_SOURCES "${SUNSHINE_TEST_REPOSITORY_ROOT}/tools/playnite_launcher/lossless_scaling_policy.cpp")

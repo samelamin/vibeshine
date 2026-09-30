@@ -224,6 +224,7 @@ set(PLATFORM_TARGET_FILES
         "${CMAKE_SOURCE_DIR}/src/platform/windows/hotkey_manager.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/playnite_ipc.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/playnite_ipc.cpp"
+        "${CMAKE_SOURCE_DIR}/src/platform/windows/vr_pairing_bridge.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/playnite_protocol.h"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/playnite_protocol.cpp"
         "${CMAKE_SOURCE_DIR}/src/platform/windows/playnite_sync_policy.h"

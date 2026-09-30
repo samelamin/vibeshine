@@ -1,0 +1,45 @@
+---
+name: VR-Pairing-CI
+permissions: {}
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ quest/vr-pairing-ci ]
+  pull_request:
+    branches: [ quest/vr-pairing-ci ]
+
+jobs:
+  windows-preview-build:
+    name: Windows preview build (fork-owned, full TrueHDR parity)
+    permissions: {}
+    uses: samelamin/vibeshine/.github/workflows/ci-windows.yml@quest/vr-pairing-ci
+    with:
+      use_self_hosted: false
+      release_commit: ${{ github.sha }}
+      release_version: 2.0.1-preview.vr-bridge.${{ github.run_number }}
+      release_tag: ''
+      artifact_source_run_id: ''
+      build_only: true
+      build_tests: true
+      release_artifact_retention_days: 1
+      symbol_product_name: VibeshineVRPreview
+      symbol_release_prefix: VibeshineVRPreview
+      publish_symbols: false
+      symbol_release_repo: samelamin/vibeshine_symbols
+      symbol_release_tag: ''
+      symbol_release_draft: false
+      upload_symbols_artifact: false
+      # Preview never publishes a signed MSI.
+      require_signpath_signing: false
+      # TrueHDR is a PUBLIC feature; the preview build mirrors upstream's
+      # official runtime pin. See docs/vr-pairing-bridge.md for the
+      # limitation note about Authenticode parity.
+      require_truehdr_runtime: true
+      truehdr_runtime_release_repo: Nonary/vibeshine_truehdr_runtime
+      truehdr_runtime_release_tag: v1.0.0
+      truehdr_runtime_asset_name: vibeshine-truehdr-runtime-1.0.0-windows-x64.zip
+    secrets:
+      signpath_api_token: ''
+      truehdr_runtime_token: ''
+      symbol_token: ''
