@@ -901,13 +901,12 @@ if(WIN32)
         PRODUCT_SOURCES "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/platform/windows/vhf_gamepad_policy.cpp"
         INCLUDE_DIRECTORIES "${SUNSHINE_LIBVIRTUALGAMEPAD_INCLUDE_DIR}"
         LINK_LIBRARIES sunshine_test_moonlight_headers)
-    # VR pairing bridge: Windows-only IPC tests against real Windows
-    # headers. The fake-peer runs in the same process; the production
-    # protocol types and helpers are exercised against a real named
-    # pipe to validate the contract end-to-end.
+    # Exercise the actual asynchronous host transport against an OS pipe peer.
     sunshine_register_component(NAME test_component_vr_pairing_bridge_ipc TEST_SOURCE unit/platform/windows/test_vr_pairing_bridge_ipc.cpp
         PRODUCT_SOURCES "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/vr_pairing_bridge.cpp"
-        LINK_LIBRARIES nlohmann_json::nlohmann_json)
+                        "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/platform/windows/vr_pairing_bridge.cpp"
+        LINK_LIBRARIES nlohmann_json::nlohmann_json Boost::asio advapi32 ws2_32)
+    set_tests_properties(test_component_vr_pairing_bridge_ipc PROPERTIES TIMEOUT 35)
     sunshine_register_component(NAME test_component_virtual_display_cleanup_policy TEST_SOURCE unit/test_virtual_display_cleanup_policy.cpp)
     sunshine_register_component(NAME test_component_lossless_scaling_policy TEST_SOURCE unit/test_lossless_scaling.cpp
         PRODUCT_SOURCES "${SUNSHINE_TEST_REPOSITORY_ROOT}/tools/playnite_launcher/lossless_scaling_policy.cpp")

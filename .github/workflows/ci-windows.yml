@@ -556,6 +556,8 @@ jobs:
           MATRIX_MSYSTEM: ${{ matrix.msystem }}
           BRANCH: ${{ github.head_ref || github.ref_name }}
           COMMIT: ${{ inputs.release_commit }}
+          SUNSHINE_REPO_OWNER: ${{ github.repository_owner }}
+          SUNSHINE_REPO_NAME: ${{ github.event.repository.name }}
           REQUIRE_TRUEHDR_RUNTIME: ${{ inputs.require_truehdr_runtime }}
         run: |
           echo "Using BUILD_VERSION=${BUILD_VERSION}"
@@ -620,8 +622,8 @@ jobs:
             -DSUNSHINE_NPM_EXECUTABLE="${NPM_PATH}" \
             -DSUNSHINE_ASSETS_DIR=assets \
             -DSUNSHINE_PUBLISHER_NAME="${GITHUB_REPOSITORY_OWNER}" \
-            -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/Nonary/vibeshine" \
-            -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/Nonary/vibeshine/issues" \
+            -DSUNSHINE_PUBLISHER_WEBSITE="https://github.com/${GITHUB_REPOSITORY}" \
+            -DSUNSHINE_PUBLISHER_ISSUE_URL="https://github.com/${GITHUB_REPOSITORY}/issues" \
             "${vdd_prebuilt_arg[@]}" \
             "${vhf_gamepad_package_arg[@]}" \
             "${truehdr_runtime_arg[@]}"

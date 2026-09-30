@@ -18,10 +18,13 @@
 #include <unordered_map>
 #include <nlohmann/json.hpp>
 #include "src/platform/common/vr_pairing_bridge.h"
-#include "src/nvhttp.h"
-#include "src/logging.h"
 #include "src/utility.h"
 
+// The host owns paired-client authority; keeping its narrow callback here
+// avoids pulling the HTTP server and unrelated runtime dependencies into IPC.
+namespace nvhttp::vr_pairing_bridge {
+  bool authorize_client_locked(const std::string &, const std::string &);
+}
 namespace platf::vr_pairing_bridge {
   namespace {
     namespace asio = boost::asio;
@@ -157,7 +160,6 @@ namespace platf::vr_pairing_bridge {
         return false;
       }
       if (!canonical_path_matches(std::wstring {image_path, image_path_size}, reg.companion_path)) {
-        BOOST_LOG(debug) << "vr_pairing_bridge: companion image mismatch";
         return false;
       }
       // 2) Open the peer process's primary token (NOT via thread
@@ -195,7 +197,6 @@ namespace platf::vr_pairing_bridge {
         }
       });
       if (!path_equals_case_insensitive(sid_str ? sid_str : L"", reg.user_sid)) {
-        BOOST_LOG(debug) << "vr_pairing_bridge: peer SID mismatch";
         return false;
       }
       // 3) Peer session id must equal both the registered session and our
@@ -205,9 +206,6 @@ namespace platf::vr_pairing_bridge {
         return false;
       }
       if (peer_session != reg.session_id || peer_session != expected_session) {
-        BOOST_LOG(debug) << "vr_pairing_bridge: peer session mismatch (peer="
-                         << peer_session << ", reg=" << reg.session_id
-                         << ", host=" << expected_session << ")";
         return false;
       }
       return true;
