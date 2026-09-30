@@ -254,3 +254,5 @@ Agy Gemini 3.1 Pro (High) reviewed the transport correction plan. The host now u
 Adjudication: retain the HTTP caller absolute deadline as well as the I/O deadline: shared promise ownership makes abandonment safe and bounds callers if the worker stalls. Unsolicited companion authorize RPCs are required; therefore incoming partial frames use a five-second timer rather than rejecting traffic when no host RPC is pending. Host startup discovers the local bridge without starting SteamVR.
 
 This branch is a draft for Windows CI, not a release or final sign-off. Real Windows transport and final Agy review remain required.
+
+Agy implementation review found no concrete transport lifetime/authentication blocker after correction. Source verification resolves its conditional comments: `util::FailGuard` runs unless disabled; `sunshinesvc.cpp` creates Sunshine in the active console session with a duplicated SYSTEM token; Windows uses the current MSYS OpenSSL dependency. Initial Windows CI caught the standalone test source being compiled twice (once without its macros); CMake now compiles only its including runner. Actual host/pipe tests remain the release gate.

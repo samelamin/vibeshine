@@ -300,7 +300,6 @@ sunshine_add_test_target(
 # only IPC tests live in a separate Windows-only test target.
 add_executable(test_fast_vr_pairing_bridge_protocol
     "${CMAKE_CURRENT_LIST_DIR}/unit/test_vr_pairing_bridge_protocol_main.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/unit/test_vr_pairing_bridge_protocol.cpp"
     "${SUNSHINE_TEST_REPOSITORY_ROOT}/src/vr_pairing_bridge.cpp"
 )
 target_include_directories(test_fast_vr_pairing_bridge_protocol PRIVATE
