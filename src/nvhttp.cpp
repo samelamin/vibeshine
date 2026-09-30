@@ -5563,7 +5563,7 @@ namespace nvhttp {
   // First-party VR pairing bridge HTTPS handlers
   //
   // GET  /api/vr/capabilities
-  //   - Public, never exposes private keys or paired-client state.
+  //   - Requires a currently authorized paired-client certificate.
   //   - Returns {schema, bootstrap, bridge_ready, error}.
   //
   // POST /api/vr/bootstrap
@@ -5578,25 +5578,26 @@ namespace nvhttp {
   // ---------------------------------------------------------------------------
 
   void getVrCapabilities(https_server_t *server, resp_https_t response, req_https_t request) {
+    using json = nlohmann::json;
 
     SimpleWeb::CaseInsensitiveMultimap headers;
     headers.emplace("Content-Type", "application/json; charset=utf-8");
 
-    auto write_unauthorized = [&](const std::string &token) {
+    auto write_unauthorized = [&](std::string_view token) {
       json body;
       body["schema"] = ::vr_pairing_bridge::kSchemaVersion;
       body["bootstrap"] = 1;
       body["bridge_ready"] = false;
-      body["error"] = token;
+      body["error"] = std::string(token);
       response->write(SimpleWeb::StatusCode::client_error_unauthorized, body.dump(), headers);
       response->close_connection_after_response = true;
     };
-    auto write_internal = [&](const std::string &token) {
+    auto write_internal = [&](std::string_view token) {
       json body;
       body["schema"] = ::vr_pairing_bridge::kSchemaVersion;
       body["bootstrap"] = 1;
       body["bridge_ready"] = false;
-      body["error"] = token;
+      body["error"] = std::string(token);
       response->write(SimpleWeb::StatusCode::server_error_internal_server_error, body.dump(), headers);
       response->close_connection_after_response = true;
     };
@@ -5686,15 +5687,16 @@ namespace nvhttp {
   }  // namespace
 
   void postVrBootstrap(https_server_t *server, resp_https_t response, req_https_t request) {
+    using json = nlohmann::json;
 
     SimpleWeb::CaseInsensitiveMultimap headers;
     headers.emplace("Content-Type", "application/json; charset=utf-8");
 
-    auto fail = [&](SimpleWeb::StatusCode code, const std::string &token, const std::string &msg) {
+    auto fail = [&](SimpleWeb::StatusCode code, std::string_view token, const std::string &msg) {
       json body;
       body["schema"] = ::vr_pairing_bridge::kSchemaVersion;
       body["ok"] = false;
-      body["error"] = token;
+      body["error"] = std::string(token);
       if (!msg.empty()) {
         body["message"] = msg;
       }
@@ -5745,7 +5747,7 @@ namespace nvhttp {
       fail(SimpleWeb::StatusCode::client_error_bad_request, ::vr_pairing_bridge::error::kBadRequest, "schema or client_nonce missing");
       return;
     }
-    const auto schema = schema_it->get<std::uint32_t>();
+    const auto schema = schema_it->get<std::uint64_t>();
     const auto client_nonce = nonce_it->get<std::string>();
     if (schema != ::vr_pairing_bridge::kSchemaVersion) {
       fail(SimpleWeb::StatusCode::client_error_bad_request, ::vr_pairing_bridge::error::kBadRequest, "Unsupported schema");

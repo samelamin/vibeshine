@@ -628,14 +628,12 @@ jobs:
             "${vhf_gamepad_package_arg[@]}" \
             "${truehdr_runtime_arg[@]}"
           echo "::add-matcher::.github/matchers/gcc.json"
+          if [[ "${{ inputs.build_tests }}" == "true" ]]; then
+            cmake --build build --target test_fast_vr_pairing_bridge_protocol test_component_vr_pairing_bridge_ipc --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
+            ctest --test-dir build --output-on-failure --no-tests=error -R '^test_(fast_vr_pairing_bridge_protocol|component_vr_pairing_bridge_ipc)$'
+          fi
           cmake --build build --target all --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
           echo "::remove-matcher owner=gcc::"
-
-      - name: Test VR pairing protocol and Windows transport
-        if: inputs.build_tests
-        shell: msys2 {0}
-        run: |
-          ctest --test-dir build --output-on-failure --no-tests=error -R '^test_(fast_vr_pairing_bridge_protocol|component_vr_pairing_bridge_ipc)$'
 
       - name: Install cv2pdb
         if: startsWith(github.ref, 'refs/tags/') || inputs.publish_symbols || inputs.upload_symbols_artifact
